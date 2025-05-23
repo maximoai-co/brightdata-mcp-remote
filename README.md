@@ -53,7 +53,7 @@ Welcome to the official Bright Data Model Context Protocol (MCP) server, enablin
 ```
 ## 🔧 Available Tools
 
-[List of Available Tools](https://github.com/luminati-io/brightdata-mcp/blob/main/assets/Tools.md)
+[List of Available Tools](https://github.com/brightdata-com/brightdata-mcp/blob/main/assets/Tools.md)
 
 ## ⚠️ Security Best Practices
 
@@ -109,12 +109,12 @@ Some example queries that this MCP server will be able to help with:
 
 ## 🎬 Demo
 
-For YouTube tutorials and demos: [Demo](https://github.com/luminati-io/brightdata-mcp/blob/main/examples/README.md)
+For YouTube tutorials and demos: [Demo](https://github.com/brightdata-com/brightdata-mcp/blob/main/examples/README.md)
 
 The videos below demonstrate a minimal use case for Claude Desktop:
 
-![Demo](https://github.com/luminati-io/brightdata-mcp/blob/main/assets/Demo3.gif)
-![Demo](https://github.com/luminati-io/brightdata-mcp/blob/main/assets/Demo.gif)
+![Demo](https://github.com/brightdata-com/brightdata-mcp/blob/main/assets/Demo3.gif)
+![Demo](https://github.com/brightdata-com/brightdata-mcp/blob/main/assets/Demo.gif)
 
 ## ⚠️ Troubleshooting
 
