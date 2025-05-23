@@ -1,6 +1,6 @@
 {
     "name": "@brightdata/mcp",
-    "version": "1.9.1",
+    "version": "1.9.2",
     "description": "An MCP interface into the Bright Data toolset",
     "type": "module",
     "bin": {
@@ -12,8 +12,8 @@
     ],
     "author": "Bright Data",
     "repository": {
-      "type": "git",
-      "url": "https://github.com/brightdata-com/brightdata-mcp.git"
+        "type": "git",
+        "url": "https://github.com/brightdata-com/brightdata-mcp.git"
     },
     "license": "MIT",
     "dependencies": {
