@@ -11,6 +11,10 @@
         "brightdata"
     ],
     "author": "Bright Data",
+    "repository": {
+      "type": "git",
+      "url": "https://github.com/brightdata-com/brightdata-mcp.git"
+    },
     "license": "MIT",
     "dependencies": {
         "axios": "^1.8.4",
