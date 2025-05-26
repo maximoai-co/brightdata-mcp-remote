@@ -22,6 +22,21 @@ Welcome to the official Bright Data Model Context Protocol (MCP) server, enablin
 
 ![MCP](https://github.com/user-attachments/assets/b949cb3e-c80a-4a43-b6a5-e0d6cec619a7)
 
+## Table of Content
+- [🎬 Demo](#-demo)
+- [✨ Features](#-features)
+- [🚀 Quickstart with Claude Desktop](#-quickstart-with-claude-desktop)
+- [🔧 Available Tools](#-available-tools)
+- [⚠️ Security Best Practices](#%EF%B8%8F-security-best-practices)
+- [🔧 Account Setup](#-account-setup)
+- [🔌 Other MCP Clients](#-other-mcp-clients)
+- [🎮 Try Bright Data MCP Playgrounds](#-try-bright-data-mcp-playgrounds)
+- [💡 Usage Examples](#-usage-examples)
+- [⚠️ Troubleshooting](#%EF%B8%8F-troubleshooting)
+- [👨‍💻 Contributing](#-contributing)
+- [📞 Support](#-support)
+
+
 ## 🎬 Demo
 
 The videos below demonstrate a minimal use case for Claude Desktop:
