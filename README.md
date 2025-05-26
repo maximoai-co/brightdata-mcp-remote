@@ -22,6 +22,16 @@ Welcome to the official Bright Data Model Context Protocol (MCP) server, enablin
 
 ![MCP](https://github.com/user-attachments/assets/b949cb3e-c80a-4a43-b6a5-e0d6cec619a7)
 
+## 🎬 Demo
+
+The videos below demonstrate a minimal use case for Claude Desktop:
+
+https://github.com/user-attachments/assets/59f6ebba-801a-49ab-8278-1b2120912e33
+
+https://github.com/user-attachments/assets/61ab0bee-fdfa-4d50-b0de-5fab96b4b91d 
+
+For YouTube tutorials and demos: [Demo](https://github.com/brightdata-com/brightdata-mcp/blob/main/examples/README.md)
+
 ## ✨ Features
 
 - **Real-time Web Access**: Access up-to-date information directly from the web
@@ -106,15 +116,6 @@ Some example queries that this MCP server will be able to help with:
 - "What's the Wikipedia article of the day?"
 - "What's the 7-day weather forecast in [your location]?"
 - "Of the 3 highest paid tech CEOs, how long have their careers been?"
-
-## 🎬 Demo
-
-For YouTube tutorials and demos: [Demo](https://github.com/brightdata-com/brightdata-mcp/blob/main/examples/README.md)
-
-The videos below demonstrate a minimal use case for Claude Desktop:
-
-![Demo](https://github.com/brightdata-com/brightdata-mcp/blob/main/assets/Demo3.gif)
-![Demo](https://github.com/brightdata-com/brightdata-mcp/blob/main/assets/Demo.gif)
 
 ## ⚠️ Troubleshooting
 
