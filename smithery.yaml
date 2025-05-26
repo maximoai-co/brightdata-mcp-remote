@@ -11,9 +11,9 @@ startCommand:
       webUnlockerZone:
         type: string
         description: "Optional: The Web Unlocker zone name (defaults to 'mcp_unlocker')"
-      browserAuth:
+      browserZone:
         type: string
-        description: "Optional: Authentication string for the Scraping Browser (enables browser control tools)"
+        description: "Optional: Zone name for the Browser API (enables browser control tools, deafults to 'mcp_browser')"
   commandFunction: |-
     config => ({ 
       command: 'node', 
@@ -21,6 +21,6 @@ startCommand:
       env: { 
         API_TOKEN: config.apiToken,
         WEB_UNLOCKER_ZONE: config.webUnlockerZone || 'mcp_unlocker',
-        BROWSER_AUTH: config.browserAuth || ''
+        BROWSER_ZONE: config.browserZone || ''
       } 
     })
