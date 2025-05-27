@@ -1,20 +1,43 @@
 'use strict'; /*jslint node:true es9:true*/
-import {UserError, imageContent} from 'fastmcp';
+import {UserError, imageContent as image_content} from 'fastmcp';
 import {z} from 'zod';
+import axios from 'axios';
 import {Browser_session} from './browser_session.js';
-let browser_auth = process.env.BROWSER_AUTH;
+let browser_zone = process.env.BROWSER_ZONE || 'mcp_browser';
 
 let open_session;
-const require_browser = ()=>{
-    return open_session = open_session || new Browser_session({
-        cdp_endpoint: calculate_cdp_endpoint(),
-    });
+const require_browser = async()=>{
+    if (!open_session)
+    {
+        open_session = new Browser_session({
+            cdp_endpoint: await calculate_cdp_endpoint(),
+        });
+    }
+    return open_session;
 };
 
-const calculate_cdp_endpoint = ()=>{
-    if (browser_auth.startsWith('ws://') || browser_auth.startsWith('wss://'))
-        return browser_auth;
-    return `wss://${browser_auth}@brd.superproxy.io:9222`;
+const calculate_cdp_endpoint = async()=>{
+    try {
+        const status_response = await axios({
+            url: 'https://api.brightdata.com/status',
+            method: 'GET',
+            headers: {authorization: `Bearer ${process.env.API_TOKEN}`},
+        });
+        const customer = status_response.data.customer;
+        const password_response = await axios({
+            url: `https://api.brightdata.com/zone/passwords?zone=${browser_zone}`,
+            method: 'GET',
+            headers: {authorization: `Bearer ${process.env.API_TOKEN}`},
+        });
+        const password = password_response.data.passwords[0];
+
+        return `wss://brd-customer-${customer}-zone-${browser_zone}:`
+            +`${password}@brd.superproxy.io:9222`;
+    } catch(e){
+        if (e.response?.status===422)
+            throw new Error(`Browser zone '${browser_zone}' does not exist`);
+        throw new Error(`Error retrieving browser credentials: ${e.message}`);
+    }
 };
 
 let scraping_browser_navigate = {
@@ -24,11 +47,11 @@ let scraping_browser_navigate = {
         url: z.string().describe('The URL to navigate to'),
     }),
     execute: async({url})=>{
-        const page = await require_browser().get_page({url});
+        const page = await (await require_browser()).get_page({url});
         try {
             await page.goto(url, {
                 timeout: 120000,
-                waitUntil: 'domcontentloaded'
+                waitUntil: 'domcontentloaded',
             });
             return [
                 `Successfully navigated to ${url}`,
@@ -38,7 +61,7 @@ let scraping_browser_navigate = {
         } catch(e){
             throw new UserError(`Error navigating to ${url}: ${e}`);
         }
-    }
+    },
 };
 
 let scraping_browser_go_back = {
@@ -57,7 +80,7 @@ let scraping_browser_go_back = {
         } catch(e){
             throw new UserError(`Error navigating back: ${e}`);
         }
-    }
+    },
 };
 
 const scraping_browser_go_forward = {
@@ -76,7 +99,7 @@ const scraping_browser_go_forward = {
         } catch(e){
             throw new UserError(`Error navigating forward: ${e}`);
         }
-    }
+    },
 };
 
 let scraping_browser_click = {
@@ -97,7 +120,7 @@ let scraping_browser_click = {
         } catch(e){
             throw new UserError(`Error clicking element ${selector}: ${e}`);
         }
-    }
+    },
 };
 
 let scraping_browser_links = {
@@ -111,8 +134,8 @@ let scraping_browser_links = {
     execute: async()=>{
         const page = await (await require_browser()).get_page();
         try {
-            const links = await page.$$eval('a', (elements)=>{
-                return elements.map((el)=>{
+            const links = await page.$$eval('a', elements=>{
+                return elements.map(el=>{
                     return {
                         text: el.innerText,
                         href: el.href,
@@ -148,7 +171,7 @@ let scraping_browser_type = {
         } catch(e){
             throw new UserError(`Error typing into element ${selector}: ${e}`);
         }
-    }
+    },
 };
 
 let scraping_browser_wait_for = {
@@ -167,7 +190,7 @@ let scraping_browser_wait_for = {
         } catch(e){
             throw new UserError(`Error waiting for element ${selector}: ${e}`);
         }
-    }
+    },
 };
 
 let scraping_browser_screenshot = {
@@ -184,11 +207,11 @@ let scraping_browser_screenshot = {
         const page = await (await require_browser()).get_page();
         try {
             const buffer = await page.screenshot({fullPage: full_page});
-            return imageContent({buffer});
+            return image_content({buffer});
         } catch(e){
             throw new UserError(`Error taking screenshot: ${e}`);
         }
-    }
+    },
 };
 
 let scraping_browser_get_html = {
@@ -215,7 +238,7 @@ let scraping_browser_get_html = {
         } catch(e){
             throw new UserError(`Error getting HTML content: ${e}`);
         }
-    }
+    },
 };
 
 let scraping_browser_get_text = {
@@ -237,10 +260,17 @@ let scraping_browser_activation_instructions = {
         return 'You need to run this MCP server with the BROWSER_AUTH '
         +'environment varialbe before the browser tools will become '
         +'available';
-    }
+    },
 };
 
-export const tools = browser_auth ? [
+let browser_credentials;
+try {
+    browser_credentials = process.env.API_TOKEN ?
+        await calculate_cdp_endpoint() : null;
+} catch(e){
+    browser_credentials = null;
+}
+export const tools = browser_credentials ? [
     scraping_browser_navigate,
     scraping_browser_go_back,
     scraping_browser_go_forward,
@@ -252,4 +282,3 @@ export const tools = browser_auth ? [
     scraping_browser_get_text,
     scraping_browser_get_html,
 ] : [scraping_browser_activation_instructions];
-

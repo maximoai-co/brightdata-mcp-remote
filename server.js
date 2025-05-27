@@ -461,15 +461,6 @@ const datasets = [{
     ].join('\n'),
     inputs: ['url'],
 }, {
-    id: 'reuter_news',
-    dataset_id: 'gd_lyptx9h74wtlvpnfu',
-    description: [
-        'Quickly read structured reuter news data.',
-        'Requires a valid reuter news report URL.',
-        'This can be a cache lookup, so it can be more reliable than scraping',
-    ].join('\n'),
-    inputs: ['url'],
-}, {
     id: 'github_repository_file',
     dataset_id: 'gd_lyrexgxc24b3d4imjt',
     description: [

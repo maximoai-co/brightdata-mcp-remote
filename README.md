@@ -45,7 +45,7 @@ Welcome to the official Bright Data Model Context Protocol (MCP) server, enablin
       "env": {
         "API_TOKEN": "<insert-your-api-token-here>",
         "WEB_UNLOCKER_ZONE": "<optional if you want to override the default mcp_unlocker zone name>",
-        "BROWSER_AUTH": "<optional if you want to enable remote browser control tools>"
+        "BROWSER_ZONE": "<optional browser zone name, defaults to mcp_browser>"
       }
     }
   }
@@ -73,10 +73,9 @@ Instead:
    - For more control, you can create your own Web Unlocker zone in your [control panel](https://brightdata.com/cp/zones) and specify it with the `WEB_UNLOCKER_ZONE` environment variable
 
 4. (Optional) To enable browser control tools:
-   - Visit your Bright Data control panel at [brightdata.com/cp/zones](https://brightdata.com/cp/zones)
-   - Create a new 'Browser API' zone
-   - Once created, copy the authentication string from the Browser API overview tab
-   - The authentication string will be formatted like: `brd-customer-[your-customer-ID]-zone-[your-zone-ID]:[your-password]`
+   - By default, the MCP tries to fetch credentials of `mcp_browser` zone.
+   - If you don't have an `mcp_browser` zone, you can :
+     - Create a Browser API zone in your [control panel](https://brightdata.com/cp/zones) or use an existing one and specify its name using the `BROWSER_ZONE` environment variable
 
 ![Browser API Setup](https://github.com/user-attachments/assets/cb494aa8-d84d-4bb4-a509-8afb96872afe)
 
@@ -86,6 +85,22 @@ To use this MCP server with other agent types, you should adapt the following to
 
 - The full command to run the MCP server is `npx @brightdata/mcp`
 - The environment variable `API_TOKEN=<your-token>` must exist when running the server
+- (Optional) Set `BROWSER_ZONE=<zone-name>` to specify a custom Browser API zone name (defaults to `mcp_browser`)
+
+## 🔄 Breaking Changes
+
+### Browser Authentication Update
+
+**BREAKING CHANGE:** The `BROWSER_AUTH` environment variable has been replaced with `BROWSER_ZONE`.
+
+- **Before:** Users needed to provide `BROWSER_AUTH="user:pass"` from the Browser API zone
+- **Now:** Users only need to specify the browser zone name with `BROWSER_ZONE="zone_name"`
+- **Default:** If not specified, the system uses `mcp_browser` zone automatically
+- **Migration:** Replace `BROWSER_AUTH` with `BROWSER_ZONE` in your configuration and specify your Browser API zone name if `mcp_browser` doesn't exists
+
+## 🔄 Changelog
+
+![Browser API Setup](https://github.com/brightdata-com/brightdata-mcp/blob/main/CHANGELOG.md)
 
 ## 🎮 Try Bright Data MCP Playgrounds
 
