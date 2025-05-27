@@ -100,7 +100,7 @@ To use this MCP server with other agent types, you should adapt the following to
 
 ## 🔄 Changelog
 
-![Browser API Setup](https://github.com/brightdata-com/brightdata-mcp/blob/main/CHANGELOG.md)
+[CHANGELOG.md](https://github.com/brightdata-com/brightdata-mcp/blob/main/CHANGELOG.md)
 
 ## 🎮 Try Bright Data MCP Playgrounds
 
