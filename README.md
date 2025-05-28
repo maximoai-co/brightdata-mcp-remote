@@ -10,9 +10,6 @@
 <div align="center">
   
 [![smithery badge](https://smithery.ai/badge/@luminati-io/brightdata-mcp)](https://smithery.ai/server/@luminati-io/brightdata-mcp) 
-<a href="https://glama.ai/mcp/servers/@luminati-io/brightdata-mcp">
-  <img width="200" src="https://glama.ai/mcp/servers/@luminati-io/brightdata-mcp/badge" alt="Bright Data MCP server" />
-</a>
 
 </div>
 
