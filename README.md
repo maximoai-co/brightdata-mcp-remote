@@ -9,7 +9,19 @@
 
 <div align="center">
   
-[![smithery badge](https://smithery.ai/badge/@luminati-io/brightdata-mcp)](https://smithery.ai/server/@luminati-io/brightdata-mcp) 
+<p align="center">
+  <img src="https://img.shields.io/npm/v/@brightdata/mcp?label=version"  
+       alt="npm version"/>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/npm/dw/@brightdata/mcp"  
+       alt="npm downloads"/>
+  <a href="https://smithery.ai/server/@luminati-io/brightdata-mcp">
+    <img src="https://smithery.ai/badge/@luminati-io/brightdata-mcp"  
+         alt="Smithery score"/>
+  </a>
+</p>
 
 </div>
 
