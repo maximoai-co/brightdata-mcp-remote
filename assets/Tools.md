@@ -30,3 +30,30 @@
 |scraping_browser_screenshot|Take a screenshot of the current page|
 |scraping_browser_get_html|Get the HTML content of the current page. Avoid using the full_page option unless it is important to see things like script tags since this can be large|
 |scraping_browser_get_text|Get the text content of the current page|
+|web_data_amazon_product_search|Quickly read structured amazon product search data. Requires a valid search keyword and amazon domain URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_walmart_product|Quickly read structured walmart product data. Requires a valid product URL with /ip/ in it. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_walmart_seller|Quickly read structured walmart seller data. Requires a valid walmart seller URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_ebay_product|Quickly read structured ebay product data. Requires a valid ebay product URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_homedepot_products|Quickly read structured homedepot product data. Requires a valid homedepot product URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_zara_products|Quickly read structured zara product data. Requires a valid zara product URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_etsy_products|Quickly read structured etsy product data. Requires a valid etsy product URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_bestbuy_products|Quickly read structured bestbuy product data. Requires a valid bestbuy product URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_linkedin_job_listings|Quickly read structured linkedin job listings data. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_linkedin_posts|Quickly read structured linkedin posts data. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_linkedin_people_search|Quickly read structured linkedin people search data. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_crunchbase_company|Quickly read structured crunchbase company data. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_facebook_events|Quickly read structured Facebook events data. Requires a valid Facebook event URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_tiktok_profiles|Quickly read structured Tiktok profiles data. Requires a valid Tiktok profile URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_tiktok_posts|Quickly read structured Tiktok post data. Requires a valid Tiktok post URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_tiktok_shop|Quickly read structured Tiktok shop data. Requires a valid Tiktok shop product URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_tiktok_comments|Quickly read structured Tiktok comments data. Requires a valid Tiktok video URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_google_maps_reviews|Quickly read structured Google maps reviews data. Requires a valid Google maps URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_google_shopping|Quickly read structured Google shopping data. Requires a valid Google shopping product URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_google_play_store|Quickly read structured Google play store data. Requires a valid Google play store app URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_apple_app_store|Quickly read structured apple app store data. Requires a valid apple app store app URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_reuter_news|Quickly read structured reuter news data. Requires a valid reuter news report URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_github_repository_file|Quickly read structured github repository data. Requires a valid github repository file URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_yahoo_finance_business|Quickly read structured yahoo finance business data. Requires a valid yahoo finance business URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_youtube_profiles|Quickly read structured youtube profiles data. Requires a valid youtube profile URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_youtube_comments|Quickly read structured youtube comments data. Requires a valid youtube video URL. This can be a cache lookup, so it can be more reliable than scraping|
+|web_data_reddit_posts|Quickly read structured reddit posts data. Requires a valid reddit post URL. This can be a cache lookup, so it can be more reliable than scraping|
