@@ -73,13 +73,14 @@ server.addTool({
             'bing',
             'yandex',
         ]).optional().default('google'),
+        cursor: z.string().optional().describe('Pagination cursor for next page'),
     }),
-    execute: tool_fn('search_engine', async({query, engine})=>{
+    execute: tool_fn('search_engine', async({query, engine, cursor})=>{
         let response = await axios({
             url: 'https://api.brightdata.com/request',
             method: 'POST',
             data: {
-                url: search_url(engine, query),
+                url: search_url(engine, query, cursor),
                 zone: unlocker_zone,
                 format: 'raw',
                 data_format: 'markdown',
@@ -87,6 +88,7 @@ server.addTool({
             headers: api_headers(),
             responseType: 'text',
         });
+
         return response.data;
     }),
 });
@@ -651,12 +653,13 @@ function tool_fn(name, fn){
     };
 }
 
-function search_url(engine, query){
+function search_url(engine, query, cursor){
     let q = encodeURIComponent(query);
+    let page = cursor ? parseInt(cursor) : 0;
+    let start = page * 10;
     if (engine=='yandex')
-        return `https://yandex.com/search/?text=${q}`;
+        return `https://yandex.com/search/?text=${q}&p=${page}`;
     if (engine=='bing')
-        return `https://www.bing.com/search?q=${q}`;
-    return `https://www.google.com/search?q=${q}`;
+        return `https://www.bing.com/search?q=${q}&first=${start + 1}`;
+    return `https://www.google.com/search?q=${q}&start=${start}`;
 }
-
