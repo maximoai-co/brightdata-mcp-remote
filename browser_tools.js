@@ -263,6 +263,47 @@ let scraping_browser_activation_instructions = {
     },
 };
 
+let scraping_browser_scroll = {
+    name: 'scraping_browser_scroll',
+    description: 'Scroll to the bottom of the current page',
+    parameters: z.object({}),
+    execute: async()=>{
+        const page = await (await require_browser()).get_page();
+        try {
+            await page.evaluate(()=>{
+                window.scrollTo(0, document.body.scrollHeight);
+            });
+            return 'Successfully scrolled to the bottom of the page';
+        } catch(e){
+            throw new UserError(`Error scrolling page: ${e}`);
+        }
+    },
+};
+
+let scraping_browser_scroll_to = {
+    name: 'scraping_browser_scroll_to',
+    description: 'Scroll to a specific element on the page',
+    parameters: z.object({
+        selector: z.string().describe('CSS selector for the element to scroll to'),
+    }),
+    execute: async({selector})=>{
+        const page = await (await require_browser()).get_page();
+        try {
+            await page.evaluate(sel=>{
+                const element = document.querySelector(sel);
+                if (element)
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                else 
+                    throw new Error(`Element with selector "${sel}" not found`);
+                
+            }, selector);
+            return `Successfully scrolled to element: ${selector}`;
+        } catch(e){
+            throw new UserError(`Error scrolling to element ${selector}: ${e}`);
+        }
+    },
+};
+
 let browser_credentials;
 try {
     browser_credentials = process.env.API_TOKEN ?
@@ -281,4 +322,6 @@ export const tools = browser_credentials ? [
     scraping_browser_screenshot,
     scraping_browser_get_text,
     scraping_browser_get_html,
+    scraping_browser_scroll,
+    scraping_browser_scroll_to,
 ] : [scraping_browser_activation_instructions];
