@@ -10,6 +10,26 @@ const package_json = require('./package.json');
 const api_token = process.env.API_TOKEN;
 const unlocker_zone = process.env.WEB_UNLOCKER_ZONE || 'mcp_unlocker';
 
+function parse_rate_limit(rate_limit_str) {
+    if (!rate_limit_str) 
+        return null;
+    
+    const match = rate_limit_str.match(/^(\d+)\/(\d+)([mhs])$/);
+    if (!match) 
+        throw new Error('Invalid RATE_LIMIT format. Use: 100/1h or 50/30m');
+    
+    const [, limit, time, unit] = match;
+    const multiplier = unit==='h' ? 3600 : unit==='m' ? 60 : 1;
+    
+    return {
+        limit: parseInt(limit),
+        window: parseInt(time) * multiplier * 1000, 
+        display: rate_limit_str
+    };
+}
+
+const rate_limit_config = parse_rate_limit(process.env.RATE_LIMIT);
+
 if (!api_token)
     throw new Error('Cannot run MCP server without API_TOKEN env');
 
@@ -17,6 +37,22 @@ const api_headers = ()=>({
     'user-agent': `${package_json.name}/${package_json.version}`,
     authorization: `Bearer ${api_token}`,
 });
+
+function check_rate_limit(){
+    if (!rate_limit_config) 
+        return true;
+    
+    const now = Date.now();
+    const window_start = now - rate_limit_config.window;
+    
+    debug_stats.call_timestamps = debug_stats.call_timestamps.filter(timestamp=>timestamp>window_start);
+    
+    if (debug_stats.call_timestamps.length>=rate_limit_config.limit)
+        throw new Error(`Rate limit exceeded: ${rate_limit_config.display}`);
+    
+    debug_stats.call_timestamps.push(now);
+    return true;
+}
 
 async function ensure_required_zones(){
     try {
@@ -60,8 +96,7 @@ let server = new FastMCP({
     name: 'Bright Data',
     version: package_json.version,
 });
-let debug_stats = {tool_calls: {}};
-
+let debug_stats = {tool_calls: {}, session_calls: 0, call_timestamps: []};
 server.addTool({
     name: 'search_engine',
     description: 'Scrape search results from Google, Bing or Yandex. Returns '
@@ -629,8 +664,10 @@ console.error('Starting server...');
 server.start({transportType: 'stdio'});
 function tool_fn(name, fn){
     return async(data, ctx)=>{
+        check_rate_limit();
         debug_stats.tool_calls[name] = debug_stats.tool_calls[name]||0;
         debug_stats.tool_calls[name]++;
+        debug_stats.session_calls++;
         let ts = Date.now();
         console.error(`[%s] executing %s`, name, JSON.stringify(data));
         try { return await fn(data, ctx); }
