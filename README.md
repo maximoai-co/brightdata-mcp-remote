@@ -80,6 +80,7 @@ For YouTube tutorials and demos: [Demo](https://github.com/brightdata-com/bright
         "API_TOKEN": "<insert-your-api-token-here>",
         "WEB_UNLOCKER_ZONE": "<optional if you want to override the default mcp_unlocker zone name>",
         "BROWSER_ZONE": "<optional browser zone name, defaults to mcp_browser>"
+        "RATE_LIMIT": "<optional rate limit format: limit/time+unit, e.g., 100/1h, 50/30m, 10/5s>"
       }
     }
   }
@@ -110,6 +111,13 @@ Instead:
    - By default, the MCP tries to fetch credentials of `mcp_browser` zone.
    - If you don't have an `mcp_browser` zone, you can :
      - Create a Browser API zone in your [control panel](https://brightdata.com/cp/zones) or use an existing one and specify its name using the `BROWSER_ZONE` environment variable
+    
+5. (Optional) Configure rate limiting:
+   - Set the `RATE_LIMIT` environment variable to control API usage
+   - Format: `limit/time+unit` (e.g., `100/1h` for 100 calls per hour)
+   - Supported time units: seconds (s), minutes (m), hours (h)
+   - Examples: `RATE_LIMIT=100/1h`, `RATE_LIMIT=50/30m`, `RATE_LIMIT=10/5s`
+   - Rate limiting is session-based (resets when server restarts)
 
 ![Browser API Setup](https://github.com/user-attachments/assets/cb494aa8-d84d-4bb4-a509-8afb96872afe)
 
