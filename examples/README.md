@@ -28,7 +28,12 @@ A curated list of community demos using Bright Data's MCP server.
 - **Scrape ANY Website In Realtime With This Powerful AI MCP Server**
 
    [📹 YouTube Demo](https://www.youtube.com/watch?v=bL5JIeGL3J0)
- 
+
+ - **Multi-Agent job finder using Bright Data MCP and TypeScript from SCRATCH**
+
+   [📹 YouTube Demo](https://www.youtube.com/watch?v=45OtteCGFiI)
+   
+   [💻Source Code](https://github.com/bitswired/jobwizard)
 ---
 
 Got a cool example? Open a PR or contact us!
