@@ -7,7 +7,7 @@ startCommand:
     properties:
       apiToken:
         type: string
-        description: "Bright Data API token, available in your Bright Data account settings"
+        description: "Bright Data API key, available in your Bright Data account settings"
       webUnlockerZone:
         type: string
         description: "Optional: The Web Unlocker zone name (defaults to 'mcp_unlocker')"
