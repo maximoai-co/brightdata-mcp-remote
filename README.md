@@ -65,6 +65,11 @@ For YouTube tutorials and demos: [Demo](https://github.com/brightdata-com/bright
 - **Seamless Integration**: Works with all MCP-compatible AI assistants
 
 ## 🚀 Quickstart with Claude Desktop
+Through Claude Desktop Extension:
+
+**Download the Claude Desktop Extension : [Bright Data's MCP Extension](https://github.com/brightdata/brightdata-mcp/raw/refs/heads/main/brightdata-mcp-extension.dxt)**
+
+Through `claude_desktop_config.json`:
 
 1. Install `nodejs` to get the `npx` command (node.js module runner). Installation instructions can be found on the [node.js website](https://nodejs.org/en/download)
 
