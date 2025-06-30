@@ -84,7 +84,7 @@ Through `claude_desktop_config.json`:
       "env": {
         "API_TOKEN": "<insert-your-api-token-here>",
         "WEB_UNLOCKER_ZONE": "<optional if you want to override the default mcp_unlocker zone name>",
-        "BROWSER_ZONE": "<optional browser zone name, defaults to mcp_browser>"
+        "BROWSER_ZONE": "<optional browser zone name, defaults to mcp_browser>",
         "RATE_LIMIT": "<optional rate limit format: limit/time+unit, e.g., 100/1h, 50/30m, 10/5s>"
       }
     }
