@@ -217,7 +217,3 @@ If your client cannot connect, check the following:
 ### Timeouts
 
 Some tools can involve reading large amounts of web data. To ensure that your agent can consume the data, set a high enough timeout in your agent's settings (e.g., `180s`).
-
-```
-
-```
