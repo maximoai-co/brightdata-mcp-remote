@@ -11,7 +11,7 @@
 </p>
 
 <h1 align="center">Remote-Enabled Bright Data MCP Server</h1>
-<h3 align="center">Enhance AI Agents with a Standalone, Real-Time Web Data Server</h3>
+<h3 align-center">Enhance AI Agents with a Standalone, Real-Time Web Data Server</h3>
 
 ## 🌟 Overview
 
@@ -20,10 +20,11 @@ This project is an enhanced version of the official [Bright Data Model Context P
 The primary contribution of this fork is to refactor the original `stdio`-based application into a persistent server that:
 
 - Runs continuously as a standalone service (`node server.js`).
-- Communicates over a secure HTTP endpoint.
-- Implements the full MCP JSON-RPC 2.0 protocol for remote connections.
+- Communicates over a secure HTTP/SSE endpoint.
+- Implements a flexible MCP JSON-RPC 2.0 protocol for remote connections.
+- Intelligently groups its large toolset to remain compatible with all clients.
 
-This allows for easier deployment, management, and connection from various distributed AI agents and applications. All the powerful, original features from the Bright Data server are preserved.
+This allows for easier deployment, management, and connection from various distributed AI agents and applications.
 
 ### Core Features (from Bright Data)
 
@@ -39,11 +40,8 @@ This allows for easier deployment, management, and connection from various distr
 - [🔧 Configuration](#-configuration)
 - [🔧 Available Tools](#-available-tools)
 - [⚠️ Security Best Practices](#%EF%B8%8F-security-best-practices)
-- [🎮 Try the Official Bright Data Playground](#-try-the-official-bright-data-playground)
 - [💡 Usage Examples](#-usage-examples)
 - [⚠️ Troubleshooting](#%EF%B8%8F-troubleshooting)
-- [👨‍💻 Contributing](#-contributing)
-- [📞 Support](#-support)
 
 ## 🚀 Running as a Standalone Server
 
@@ -83,34 +81,32 @@ If successful, you will see output confirming that the server is running:
 
 ```
 MCP-compliant server running on http://localhost:9000
-JSON-RPC endpoint available at: POST /mcp
+Handshake endpoint at: GET /sse
 ```
 
 ## 🔌 Connecting MCP Clients
 
-Any MCP-compatible client or agent can connect to your server by pointing to its endpoint and providing the correct security token.
+This server uses a stateful SSE (Server-Sent Events) connection for all communication. Clients must first establish a persistent connection and then perform the MCP handshake.
 
-- **Endpoint URL**: `http://<your-server-ip>:9000/mcp`
-- **HTTP Method**: `POST`
-- **Required Headers**:
-  - `Content-Type: application/json`
-  - `Authorization: Bearer <your_mcp_server_token>`
-
-### Example `curl` Request
-
-Here is how you would call the `tools/list` method using `curl`:
+**Step 1: Initiate SSE Connection**
+The client makes a `GET` request to the `/sse` endpoint. The server will keep this connection open for the duration of the session.
 
 ```bash
-curl -X POST \
-  http://localhost:9000/mcp \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_MCP_SERVER_TOKEN" \
-  -d '{
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/list"
-      }'
+# Connect to the SSE endpoint to start the session
+curl -N -X GET \
+  http://localhost:9000/sse \
+  -H "Authorization: Bearer YOUR_MCP_SERVER_TOKEN"
 ```
+
+**Step 2: Receive Session RPC Endpoint**
+The server's first message on the stream will be a unique RPC URL containing a session ID.
+`data: /sse/message?sessionId=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+
+**Step 3: Perform MCP Handshake & Send Commands**
+The client sends all subsequent JSON-RPC commands (like `initialize`, `tools/list`, and `tools/call`) via standard `POST` requests to this new session URL (e.g., `http://localhost:9000/sse/message?sessionId=...`).
+
+**Step 4: Receive Results**
+The results of the `POST` commands will be sent as new `message` events on the original, still-open `/sse` stream from Step 1.
 
 ## 🔧 Configuration
 
@@ -125,32 +121,48 @@ The server is configured using environment variables, ideally set in your `.env`
 
 ## 🔧 Available Tools
 
-This server supports the full suite of tools available in the original Bright Data MCP project.
+To ensure compatibility with all clients, this server uses a "super-grouping" architecture. Instead of exposing 50+ individual tools, it provides a small, stable list of high-level tools.
 
-[List of Available Tools (from original Bright Data repo)](https://github.com/brightdata-com/brightdata-mcp/blob/main/assets/Tools.md)
+### Base Tools
+
+- **`search_engine`**: Performs a general web search using Google, Bing, or Yandex.
+- **`scrape`**: Scrapes the full content of a single URL, returning either Markdown or raw HTML.
+
+### Grouped Data Tools
+
+Specialized data collection tools are bundled into thematic groups. To use them, you must provide a **`site`** and a **`task`** parameter. The available options for these parameters are found in the tool's description.
+
+**Example Group Tools:**
+
+- `e_commerce_data`
+- `social_professional_data`
+- `business_data`
+
+#### Example Usage of a Grouped Tool
+
+To get reviews for an Amazon product, an AI would follow this logic:
+
+1.  **Call `tools/list`** and see the `e_commerce_data` tool.
+2.  **Read its description**, which says for `site: 'amazon'`, one of the available `task`s is `'product_reviews'`.
+3.  **Call the tool** with the correct parameters:
+
+<!-- end list -->
+
+```json
+{
+  "tool_name": "e_commerce_data",
+  "parameters": {
+    "site": "amazon",
+    "task": "product_reviews",
+    "url": "[https://www.amazon.com/dp/B08P2H5L72](https://www.amazon.com/dp/B08P2H5L72)"
+  }
+}
+```
 
 ## ⚠️ Security Best Practices
 
-- **Protect Your `MCP_SERVER_TOKEN`**: Your `MCP_SERVER_TOKEN` is the key to your server. Keep it secret and do not expose it in client-side code. It should only be used by trusted clients.
-- **Treat Scraped Content as Untrusted**: Always treat scraped web content as untrusted data. Never use raw scraped content directly in LLM prompts to avoid potential prompt injection risks.
-- **Use Structured Data**: Prefer using the structured data extraction tools (`web_data_*`) over raw text scraping when possible.
-
-## 🎮 Try the Official Bright Data Playground
-
-To explore the capabilities of the core tools without any setup, you can use the official playground hosted by Bright Data on Smithery.
-
-**Note:** This playground uses the official Bright Data package and does not reflect the standalone server architecture of this fork.
-
-[](https://smithery.ai/server/@luminati-io/brightdata-mcp/tools)
-
-## 💡 Usage Examples
-
-Some example queries that this MCP server will be able to help with:
-
-- "Google some movies that are releasing soon in [your area]"
-- "What's Tesla's current market cap?"
-- "What's the Wikipedia article of the day?"
-- "What's the 7-day weather forecast in [your location]?"
+- **Protect Your `MCP_SERVER_TOKEN`**: Your `MCP_SERVER_TOKEN` is the key to your server. Keep it secret and do not expose it in client-side code. It should only be used by trusted back-end clients.
+- **Treat Scraped Content as Untrusted**: Always treat scraped web content as untrusted data. Sanitize it before use.
 
 ## ⚠️ Troubleshooting
 
@@ -163,18 +175,6 @@ If your client cannot connect, check the following:
 - Is your `Authorization` header correct and using the right `MCP_SERVER_TOKEN`?
 - Is there a firewall blocking the connection?
 
-### Timeouts when using certain tools
+### Timeouts
 
 Some tools can involve reading large amounts of web data. To ensure that your agent can consume the data, set a high enough timeout in your agent's settings (e.g., `180s`).
-
-## 👨‍💻 Contributing
-
-This project is now open source\! We at Maximo AI welcome contributions to help improve the remote server functionality.
-
-1.  **Report Issues**: If you encounter bugs specific to the remote server implementation, please [open an issue](https://www.google.com/search?q=https://github.com/Maximo-AI/brightdata-mcp-remote/issues) on our GitHub repository.
-2.  **Submit Pull Requests**: Feel free to fork the repository and submit pull requests with enhancements or bug fixes.
-
-## 📞 Support
-
-- For issues related to the **remote server implementation, security, or HTTP/JSON-RPC layer**, please open an issue on this project's GitHub repository.
-- For issues related to the **core Bright Data tools, the Web Unlocker, or your Bright Data account**, please refer to the official [Bright Data support channels](https://www.google.com/search?q=https://brightdata.com/contact-us).

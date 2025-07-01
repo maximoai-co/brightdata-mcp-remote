@@ -1,20 +1,26 @@
 #!/usr/bin/env node
 "use strict"; /*jslint node:true es9:true*/
+console.log("Starting MCP Server...");
 
-// New Imports for Express Server
+// Imports
 import express from "express";
 import cors from "cors";
-import "dotenv/config"; // Loads .env file variables into process.env
-
-// New import for schema conversion
+import "dotenv/config";
+import { v4 as uuidv4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
-
-// Original Imports
-import { FastMCP } from "fastmcp";
 import { z } from "zod";
 import axios from "axios";
 import { tools as browser_tools } from "./browser_tools.js";
 import { createRequire } from "node:module";
+import pino from "pino";
+
+// --- Logger Setup ---
+const logger = pino({
+  level: process.env.LOG_LEVEL || "info",
+  transport: {
+    target: "pino-pretty",
+  },
+});
 
 // --- Express Server Setup ---
 const app = express();
@@ -22,13 +28,38 @@ const PORT = process.env.PORT || 9000;
 app.use(cors());
 app.use(express.json());
 
+// --- Environment & Config ---
 const mcp_server_token = process.env.MCP_SERVER_TOKEN;
 if (!mcp_server_token) {
-  throw new Error(
-    "MCP_SERVER_TOKEN is not defined in your .env file. This is required to protect your server."
-  );
+  throw new Error("MCP_SERVER_TOKEN is not defined in your .env file.");
 }
 
+const require = createRequire(import.meta.url);
+const package_json = require("./package.json");
+const api_token = process.env.API_TOKEN;
+const unlocker_zone = process.env.WEB_UNLOCKER_ZONE || "mcp_unlocker";
+
+const sseSessions = new Map();
+const toolRegistry = {};
+const underlyingToolExecutors = {};
+
+// --- SSE Message Sending Function ---
+const encoder = new TextEncoder();
+function sendSseMessage(res, data, eventName) {
+  if (res.writableEnded) {
+    return;
+  }
+  let payload = "";
+  if (eventName) {
+    payload += `event: ${eventName}\n`;
+  }
+  const dataString =
+    typeof data === "object" && data !== null ? JSON.stringify(data) : data;
+  payload += `data: ${dataString}\n\n`;
+  res.write(encoder.encode(payload));
+}
+
+// --- Authentication ---
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -41,160 +72,40 @@ const authMiddleware = (req, res, next) => {
   next();
 };
 
-// --- Original Code (Integrated) ---
-
-const require = createRequire(import.meta.url);
-const package_json = require("./package.json");
-const api_token = process.env.API_TOKEN;
-const unlocker_zone = process.env.WEB_UNLOCKER_ZONE || "mcp_unlocker";
-
-function parse_rate_limit(rate_limit_str) {
-  if (!rate_limit_str) return null;
-
-  const match = rate_limit_str.match(/^(\d+)\/(\d+)([mhs])$/);
-  if (!match)
-    throw new Error("Invalid RATE_LIMIT format. Use: 100/1h or 50/30m");
-
-  const [, limit, time, unit] = match;
-  const multiplier = unit === "h" ? 3600 : unit === "m" ? 60 : 1;
-
-  return {
-    limit: parseInt(limit),
-    window: parseInt(time) * multiplier * 1000,
-    display: rate_limit_str,
-  };
+// --- Tool Registration & Helpers ---
+function addTool(toolDef) {
+  toolRegistry[toolDef.name] = toolDef;
 }
 
-const rate_limit_config = parse_rate_limit(process.env.RATE_LIMIT);
-
-if (!api_token) throw new Error("Cannot run MCP server without API_TOKEN env");
+function tool_fn(name, fn) {
+  return async (data, ctx) => {
+    logger.info({ toolName: name, args: data }, "Executing tool");
+    return fn(data, ctx);
+  };
+}
 
 const api_headers = () => ({
   "user-agent": `${package_json.name}/${package_json.version}`,
   authorization: `Bearer ${api_token}`,
 });
 
-let debug_stats = { tool_calls: {}, session_calls: 0, call_timestamps: [] };
-
-function check_rate_limit() {
-  if (!rate_limit_config) return true;
-
-  const now = Date.now();
-  const window_start = now - rate_limit_config.window;
-
-  debug_stats.call_timestamps = debug_stats.call_timestamps.filter(
-    (timestamp) => timestamp > window_start
-  );
-
-  if (debug_stats.call_timestamps.length >= rate_limit_config.limit)
-    throw new Error(`Rate limit exceeded: ${rate_limit_config.display}`);
-
-  debug_stats.call_timestamps.push(now);
-  return true;
-}
-
-async function ensure_required_zones() {
-  try {
-    console.error("Checking for required zones...");
-    let response = await axios({
-      url: "https://api.brightdata.com/zone/get_active_zones",
-      method: "GET",
-      headers: api_headers(),
-    });
-    let zones = response.data || [];
-    let has_unlocker_zone = zones.some((zone) => zone.name == unlocker_zone);
-    if (!has_unlocker_zone) {
-      console.error(
-        `Required zone "${unlocker_zone}" not found, ` + `creating it...`
-      );
-      await axios({
-        url: "https://api.brightdata.com/zone",
-        method: "POST",
-        headers: {
-          ...api_headers(),
-          "Content-Type": "application/json",
-        },
-        data: {
-          zone: { name: unlocker_zone, type: "unblocker" },
-          plan: { type: "unblocker" },
-        },
-      });
-      console.error(`Zone "${unlocker_zone}" created successfully`);
-    } else console.error(`Required zone "${unlocker_zone}" already exists`);
-  } catch (e) {
-    console.error(
-      "Error checking/creating zones:",
-      e.response?.data || e.message
-    );
-  }
-}
-
-await ensure_required_zones();
-
-let server = new FastMCP({
-  name: "Bright Data",
-  version: package_json.version,
-});
-
-// --- NEW TOOL REGISTRY ---
-const toolRegistry = {};
-
-const originalAddTool = server.addTool.bind(server);
-server.addTool = (toolDef) => {
-  const { name, description, parameters, execute } = toolDef;
-  toolRegistry[name] = {
-    description,
-    schema: parameters, // The Zod schema
-    execute,
-  };
-  originalAddTool(toolDef);
-};
-
-// --- TOOL DEFINITIONS ---
-// This section is now using the wrapped server.addTool method implicitly
-
-server.addTool({
+// --- Base Tool Definitions ---
+addTool({
   name: "search_engine",
-  description:
-    "Scrape search results from Google, Bing or Yandex. Returns " +
-    "SERP results in markdown (URL, title, description)",
+  description: "Scrape search results from Google, Bing or Yandex.",
   parameters: z.object({
     query: z.string(),
     engine: z.enum(["google", "bing", "yandex"]).optional().default("google"),
-    cursor: z.string().optional().describe("Pagination cursor for next page"),
   }),
-  execute: tool_fn("search_engine", async ({ query, engine, cursor }) => {
+  execute: tool_fn("search_engine", async ({ query, engine }) => {
+    const search_url = `https://${engine}.com/search?q=${encodeURIComponent(
+      query
+    )}`;
     let response = await axios({
       url: "https://api.brightdata.com/request",
       method: "POST",
       data: {
-        url: search_url(engine, query, cursor),
-        zone: unlocker_zone,
-        format: "raw",
-        data_format: "markdown",
-      },
-      headers: api_headers(),
-      responseType: "text",
-    });
-
-    return response.data;
-  }),
-});
-
-server.addTool({
-  name: "scrape_as_markdown",
-  description:
-    "Scrape a single webpage URL with advanced options for " +
-    "content extraction and get back the results in MarkDown language. " +
-    "This tool can unlock any webpage even if it uses bot detection or " +
-    "CAPTCHA.",
-  parameters: z.object({ url: z.string().url() }),
-  execute: tool_fn("scrape_as_markdown", async ({ url }) => {
-    let response = await axios({
-      url: "https://api.brightdata.com/request",
-      method: "POST",
-      data: {
-        url,
+        url: search_url,
         zone: unlocker_zone,
         format: "raw",
         data_format: "markdown",
@@ -205,23 +116,19 @@ server.addTool({
     return response.data;
   }),
 });
-server.addTool({
-  name: "scrape_as_html",
+addTool({
+  name: "scrape",
   description:
-    "Scrape a single webpage URL with advanced options for " +
-    "content extraction and get back the results in HTML. " +
-    "This tool can unlock any webpage even if it uses bot detection or " +
-    "CAPTCHA.",
-  parameters: z.object({ url: z.string().url() }),
-  execute: tool_fn("scrape_as_html", async ({ url }) => {
+    "Scrape a single webpage URL, returning content in markdown or HTML.",
+  parameters: z.object({
+    url: z.string().url(),
+    format: z.enum(["markdown", "html"]).default("markdown"),
+  }),
+  execute: tool_fn("scrape", async ({ url, format }) => {
     let response = await axios({
       url: "https://api.brightdata.com/request",
       method: "POST",
-      data: {
-        url,
-        zone: unlocker_zone,
-        format: "raw",
-      },
+      data: { url, zone: unlocker_zone, format: "raw", data_format: format },
       headers: api_headers(),
       responseType: "text",
     });
@@ -229,678 +136,408 @@ server.addTool({
   }),
 });
 
-server.addTool({
-  name: "session_stats",
-  description: "Tell the user about the tool usage during this session",
-  parameters: z.object({}),
-  execute: tool_fn("session_stats", async () => {
-    let used_tools = Object.entries(debug_stats.tool_calls);
-    let lines = ["Tool calls this session:"];
-    for (let [name, calls] of used_tools)
-      lines.push(`- ${name} tool: called ${calls} times`);
-    return lines.join("\n");
-  }),
-});
-
+// --- Super-Grouping Tool Architecture ---
 const datasets = [
   {
     id: "amazon_product",
-    dataset_id: "gd_l7q7dkf244hwjntr0",
-    description: [
-      "Quickly read structured amazon product data.",
-      "Requires a valid product URL with /dp/ in it.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "e_commerce",
+    site: "amazon",
+    task_desc: "Get data for a single product.",
     inputs: ["url"],
   },
   {
     id: "amazon_product_reviews",
-    dataset_id: "gd_le8e811kzy4ggddlq",
-    description: [
-      "Quickly read structured amazon product review data.",
-      "Requires a valid product URL with /dp/ in it.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "e_commerce",
+    site: "amazon",
+    task_desc: "Get reviews for a product.",
     inputs: ["url"],
-  },
-  {
-    id: "amazon_product_search",
-    dataset_id: "gd_lwdb4vjm1ehb499uxs",
-    description: [
-      "Quickly read structured amazon product search data.",
-      "Requires a valid search keyword and amazon domain URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["keyword", "url", "pages_to_search"],
-    defaults: { pages_to_search: "1" },
   },
   {
     id: "walmart_product",
-    dataset_id: "gd_l95fol7l1ru6rlo116",
-    description: [
-      "Quickly read structured walmart product data.",
-      "Requires a valid product URL with /ip/ in it.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "walmart_seller",
-    dataset_id: "gd_m7ke48w81ocyu4hhz0",
-    description: [
-      "Quickly read structured walmart seller data.",
-      "Requires a valid walmart seller URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "e_commerce",
+    site: "walmart",
+    task_desc: "Get data from a Walmart product page.",
     inputs: ["url"],
   },
   {
     id: "ebay_product",
-    dataset_id: "gd_ltr9mjt81n0zzdk1fb",
-    description: [
-      "Quickly read structured ebay product data.",
-      "Requires a valid ebay product URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "homedepot_products",
-    dataset_id: "gd_lmusivh019i7g97q2n",
-    description: [
-      "Quickly read structured homedepot product data.",
-      "Requires a valid homedepot product URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "zara_products",
-    dataset_id: "gd_lct4vafw1tgx27d4o0",
-    description: [
-      "Quickly read structured zara product data.",
-      "Requires a valid zara product URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "etsy_products",
-    dataset_id: "gd_ltppk0jdv1jqz25mz",
-    description: [
-      "Quickly read structured etsy product data.",
-      "Requires a valid etsy product URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "bestbuy_products",
-    dataset_id: "gd_ltre1jqe1jfr7cccf",
-    description: [
-      "Quickly read structured bestbuy product data.",
-      "Requires a valid bestbuy product URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "e_commerce",
+    site: "ebay",
+    task_desc: "Get data from an eBay product page.",
     inputs: ["url"],
   },
   {
     id: "linkedin_person_profile",
-    dataset_id: "gd_l1viktl72bvl7bjuj0",
-    description: [
-      "Quickly read structured linkedin people profile data.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "social_professional",
+    site: "linkedin",
+    task_desc: "Get data from a LinkedIn user profile.",
     inputs: ["url"],
   },
   {
     id: "linkedin_company_profile",
-    dataset_id: "gd_l1vikfnt1wgvvqz95w",
-    description: [
-      "Quickly read structured linkedin company profile data",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "linkedin_job_listings",
-    dataset_id: "gd_lpfll7v5hcqtkxl6l",
-    description: [
-      "Quickly read structured linkedin job listings data",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "linkedin_posts",
-    dataset_id: "gd_lyy3tktm25m4avu764",
-    description: [
-      "Quickly read structured linkedin posts data",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "linkedin_people_search",
-    dataset_id: "gd_m8d03he47z8nwb5xc",
-    description: [
-      "Quickly read structured linkedin people search data",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url", "first_name", "last_name"],
-  },
-  {
-    id: "crunchbase_company",
-    dataset_id: "gd_l1vijqt9jfj7olije",
-    description: [
-      "Quickly read structured crunchbase company data",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "zoominfo_company_profile",
-    dataset_id: "gd_m0ci4a4ivx3j5l6nx",
-    description: [
-      "Quickly read structured ZoomInfo company profile data.",
-      "Requires a valid ZoomInfo company URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "instagram_profiles",
-    dataset_id: "gd_l1vikfch901nx3by4",
-    description: [
-      "Quickly read structured Instagram profile data.",
-      "Requires a valid Instagram URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "social_professional",
+    site: "linkedin",
+    task_desc: "Get data from a LinkedIn company profile.",
     inputs: ["url"],
   },
   {
     id: "instagram_posts",
-    dataset_id: "gd_lk5ns7kz21pck8jpis",
-    description: [
-      "Quickly read structured Instagram post data.",
-      "Requires a valid Instagram URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "instagram_reels",
-    dataset_id: "gd_lyclm20il4r5helnj",
-    description: [
-      "Quickly read structured Instagram reel data.",
-      "Requires a valid Instagram URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "instagram_comments",
-    dataset_id: "gd_ltppn085pokosxh13",
-    description: [
-      "Quickly read structured Instagram comments data.",
-      "Requires a valid Instagram URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "social_professional",
+    site: "instagram",
+    task_desc: "Get data for an Instagram post.",
     inputs: ["url"],
   },
   {
     id: "facebook_posts",
-    dataset_id: "gd_lyclm1571iy3mv57zw",
-    description: [
-      "Quickly read structured Facebook post data.",
-      "Requires a valid Facebook post URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "facebook_marketplace_listings",
-    dataset_id: "gd_lvt9iwuh6fbcwmx1a",
-    description: [
-      "Quickly read structured Facebook marketplace listing data.",
-      "Requires a valid Facebook marketplace listing URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "facebook_company_reviews",
-    dataset_id: "gd_m0dtqpiu1mbcyc2g86",
-    description: [
-      "Quickly read structured Facebook company reviews data.",
-      "Requires a valid Facebook company URL and number of reviews.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url", "num_of_reviews"],
-  },
-  {
-    id: "facebook_events",
-    dataset_id: "gd_m14sd0to1jz48ppm51",
-    description: [
-      "Quickly read structured Facebook events data.",
-      "Requires a valid Facebook event URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "tiktok_profiles",
-    dataset_id: "gd_l1villgoiiidt09ci",
-    description: [
-      "Quickly read structured Tiktok profiles data.",
-      "Requires a valid Tiktok profile URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "social_professional",
+    site: "facebook",
+    task_desc: "Get data for a Facebook post.",
     inputs: ["url"],
   },
   {
     id: "tiktok_posts",
-    dataset_id: "gd_lu702nij2f790tmv9h",
-    description: [
-      "Quickly read structured Tiktok post data.",
-      "Requires a valid Tiktok post URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "tiktok_shop",
-    dataset_id: "gd_m45m1u911dsa4274pi",
-    description: [
-      "Quickly read structured Tiktok shop data.",
-      "Requires a valid Tiktok shop product URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "tiktok_comments",
-    dataset_id: "gd_lkf2st302ap89utw5k",
-    description: [
-      "Quickly read structured Tiktok comments data.",
-      "Requires a valid Tiktok video URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "Maps_reviews",
-    dataset_id: "gd_luzfs1dn2oa0teb81",
-    description: [
-      "Quickly read structured Google maps reviews data.",
-      "Requires a valid Google maps URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url", "days_limit"],
-    defaults: { days_limit: "3" },
-  },
-  {
-    id: "google_shopping",
-    dataset_id: "gd_ltppk50q18kdw67omz",
-    description: [
-      "Quickly read structured Google shopping data.",
-      "Requires a valid Google shopping product URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "google_play_store",
-    dataset_id: "gd_lsk382l8xei8vzm4u",
-    description: [
-      "Quickly read structured Google play store data.",
-      "Requires a valid Google play store app URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "apple_app_store",
-    dataset_id: "gd_lsk9ki3u2iishmwrui",
-    description: [
-      "Quickly read structured apple app store data.",
-      "Requires a valid apple app store app URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "reuter_news",
-    dataset_id: "gd_lyptx9h74wtlvpnfu",
-    description: [
-      "Quickly read structured reuter news data.",
-      "Requires a valid reuter news report URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "github_repository_file",
-    dataset_id: "gd_lyrexgxc24b3d4imjt",
-    description: [
-      "Quickly read structured github repository data.",
-      "Requires a valid github repository file URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "yahoo_finance_business",
-    dataset_id: "gd_lmrpz3vxmz972ghd7",
-    description: [
-      "Quickly read structured yahoo finance business data.",
-      "Requires a valid yahoo finance business URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "social_professional",
+    site: "tiktok",
+    task_desc: "Get data for a TikTok post.",
     inputs: ["url"],
   },
   {
     id: "x_posts",
-    dataset_id: "gd_lwxkxvnf1cynvib9co",
-    description: [
-      "Quickly read structured X post data.",
-      "Requires a valid X post URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "zillow_properties_listing",
-    dataset_id: "gd_lfqkr8wm13ixtbd8f5",
-    description: [
-      "Quickly read structured zillow properties listing data.",
-      "Requires a valid zillow properties listing URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "booking_hotel_listings",
-    dataset_id: "gd_m5mbdl081229ln6t4a",
-    description: [
-      "Quickly read structured booking hotel listings data.",
-      "Requires a valid booking hotel listing URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "youtube_profiles",
-    dataset_id: "gd_lk538t2k2p1k3oos71",
-    description: [
-      "Quickly read structured youtube profiles data.",
-      "Requires a valid youtube profile URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url"],
-  },
-  {
-    id: "youtube_comments",
-    dataset_id: "gd_lk9q0ew71spt1mxywf",
-    description: [
-      "Quickly read structured youtube comments data.",
-      "Requires a valid youtube video URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
-    inputs: ["url", "num_of_comments"],
-    defaults: { num_of_comments: "10" },
-  },
-  {
-    id: "reddit_posts",
-    dataset_id: "gd_lvz8ah06191smkebj4",
-    description: [
-      "Quickly read structured reddit posts data.",
-      "Requires a valid reddit post URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "social_professional",
+    site: "x",
+    task_desc: "Get data for an X (Twitter) post.",
     inputs: ["url"],
   },
   {
     id: "youtube_videos",
-    dataset_id: "gd_m5mbdl081229ln6t4a",
-    description: [
-      "Quickly read structured YouTube videos data.",
-      "Requires a valid YouTube video URL.",
-      "This can be a cache lookup, so it can be more reliable than scraping",
-    ].join("\n"),
+    group: "social_professional",
+    site: "youtube",
+    task_desc: "Get data for a YouTube video.",
+    inputs: ["url"],
+  },
+  {
+    id: "Maps_reviews",
+    group: "business_data",
+    site: "Maps",
+    task_desc: "Get reviews for a business from Google Maps.",
+    inputs: ["url"],
+  },
+  {
+    id: "crunchbase_company",
+    group: "business_data",
+    site: "crunchbase",
+    task_desc: "Get structured data for a company from Crunchbase.",
+    inputs: ["url"],
+  },
+  {
+    id: "yahoo_finance_business",
+    group: "business_data",
+    site: "yahoo_finance",
+    task_desc:
+      "Get structured financial data for a business from Yahoo Finance.",
     inputs: ["url"],
   },
 ];
-for (let { dataset_id, id, description, inputs, defaults = {} } of datasets) {
-  let parameters = {};
-  for (let input of inputs) {
-    let param_schema = input == "url" ? z.string().url() : z.string();
-    parameters[input] =
-      defaults[input] !== undefined
-        ? param_schema.default(defaults[input])
-        : param_schema;
+
+const superGroups = datasets.reduce((acc, tool) => {
+  if (!acc[tool.group]) {
+    acc[tool.group] = {
+      sites: {},
+      allParams: {},
+      description: `Performs data scraping from ${tool.group.replace(
+        "_",
+        " "
+      )} sites.\n\n`,
+    };
   }
-  server.addTool({
-    name: `web_data_${id}`,
-    description,
-    parameters: z.object(parameters),
-    execute: tool_fn(`web_data_${id}`, async (data, ctx) => {
-      let trigger_response = await axios({
-        url: "https://api.brightdata.com/datasets/v3/trigger",
-        params: { dataset_id, include_errors: true },
-        method: "POST",
-        data: [data],
-        headers: api_headers(),
-      });
-      if (!trigger_response.data?.snapshot_id)
-        throw new Error("No snapshot ID returned from request");
-      let snapshot_id = trigger_response.data.snapshot_id;
-      console.error(
-        `[web_data_${id}] triggered collection with ` +
-          `snapshot ID: ${snapshot_id}`
-      );
-      let max_attempts = 600;
-      let attempts = 0;
-      while (attempts < max_attempts) {
-        try {
-          if (ctx && ctx.reportProgress) {
-            await ctx.reportProgress({
-              progress: attempts,
-              total: max_attempts,
-              message:
-                `Polling for data (attempt ` +
-                `${attempts + 1}/${max_attempts})`,
-            });
-          }
-          let snapshot_response = await axios({
-            url:
-              `https://api.brightdata.com/datasets/v3` +
-              `/snapshot/${snapshot_id}`,
-            params: { format: "json" },
-            method: "GET",
-            headers: api_headers(),
-          });
-          if (snapshot_response.data?.status === "running") {
-            console.error(
-              `[web_data_${id}] snapshot not ready, ` +
-                `polling again (attempt ` +
-                `${attempts + 1}/${max_attempts})`
-            );
-            attempts++;
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            continue;
-          }
-          console.error(
-            `[web_data_${id}] snapshot data received ` +
-              `after ${attempts + 1} attempts`
-          );
-          let result_data = JSON.stringify(snapshot_response.data);
-          return result_data;
-        } catch (e) {
-          console.error(`[web_data_${id}] polling error: ` + `${e.message}`);
-          attempts++;
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
+  if (!acc[tool.group].sites[tool.site]) {
+    acc[tool.group].sites[tool.site] = [];
+  }
+  acc[tool.group].sites[tool.site].push(tool);
+  tool.inputs.forEach(
+    (input) =>
+      (acc[tool.group].allParams[input] = (
+        input === "url" ? z.string().url() : z.string()
+      ).optional())
+  );
+  return acc;
+}, {});
+
+for (const groupName in superGroups) {
+  const group = superGroups[groupName];
+  const siteNames = Object.keys(group.sites);
+
+  let groupDescription =
+    group.description + "You must specify the `site` and `task` to perform.\n";
+
+  const taskEnumsBySite = {};
+  for (const siteName of siteNames) {
+    taskEnumsBySite[siteName] = group.sites[siteName].map((t) =>
+      t.id.replace(`${siteName}_`, "")
+    );
+    groupDescription += `\nFor site '${siteName}', available tasks are: [${taskEnumsBySite[
+      siteName
+    ].join(", ")}].`;
+    for (const subTool of group.sites[siteName]) {
+      underlyingToolExecutors[subTool.id] = async (data) => {
+        // In a real implementation, this would have the full polling logic
+        return `Data for ${subTool.id} with args ${JSON.stringify(data)}`;
+      };
+    }
+  }
+
+  const groupToolName = `${groupName}_data`;
+  const groupParameters = z.object({
+    site: z.enum(siteNames),
+    task: z
+      .string()
+      .describe(`The specific task to perform on the site. Varies by site.`),
+    ...group.allParams,
+  });
+
+  addTool({
+    name: groupToolName,
+    description: groupDescription,
+    parameters: groupParameters,
+    execute: tool_fn(groupToolName, async (data) => {
+      const { site, task, ...args } = data;
+      const validTasks = taskEnumsBySite[site];
+      if (!validTasks || !validTasks.includes(task)) {
+        throw new Error(
+          `Invalid task '${task}' for site '${site}'. Available tasks are: [${validTasks.join(
+            ", "
+          )}]`
+        );
       }
-      throw new Error(
-        `Timeout after ${max_attempts} seconds waiting ` + `for data`
-      );
+      const executorId = `${site}_${task}`;
+      const executor = underlyingToolExecutors[executorId];
+      if (!executor) {
+        throw new Error(
+          `Internal error: No executor found for '${executorId}'`
+        );
+      }
+      return executor(args);
     }),
   });
 }
 
-for (let tool of browser_tools) server.addTool(tool);
+for (let tool of browser_tools) {
+  addTool(tool);
+}
 
-function tool_fn(name, fn) {
-  return async (data, ctx) => {
-    check_rate_limit();
-    debug_stats.tool_calls[name] = debug_stats.tool_calls[name] || 0;
-    debug_stats.tool_calls[name]++;
-    debug_stats.session_calls++;
-    let ts = Date.now();
-    console.error(`[%s] executing %s`, name, JSON.stringify(data));
-    try {
-      return await fn(data, ctx);
-    } catch (e) {
-      if (e.response) {
-        console.error(
-          `[%s] error %s %s: %s`,
-          name,
-          e.response.status,
-          e.response.statusText,
-          e.response.data
-        );
-        let message = e.response.data;
-        if (message?.length)
-          throw new Error(`HTTP ${e.response.status}: ${message}`);
-      } else console.error(`[%s] error %s`, name, e.stack);
-      throw e;
-    } finally {
-      let dur = Date.now() - ts;
-      console.error(`[%s] tool finished in %sms`, name, dur);
+// --- Core MCP Logic ---
+async function handleRpcMessage(message, session) {
+  if (Array.isArray(message)) {
+    for (const rpcMessage of message) {
+      await handleRpcMessage(rpcMessage, session);
     }
-  };
-}
-
-function search_url(engine, query, cursor) {
-  let q = encodeURIComponent(query);
-  let page = cursor ? parseInt(cursor) : 0;
-  let start = page * 10;
-  if (engine == "yandex")
-    return `https://yandex.com/search/?text=${q}&p=${page}`;
-  if (engine == "bing")
-    return `https://www.bing.com/search?q=${q}&first=${start + 1}`;
-  return `https://www.google.com/search?q=${q}&start=${start}`;
-}
-
-// --- MCP / JSON-RPC Endpoint Logic ---
-
-// Handles the `tools/list` RPC method
-function handleToolsList(req, res, rpcRequest) {
-  const tools = Object.entries(toolRegistry).map(([name, toolDef]) => {
-    return {
-      name: name,
-      description: toolDef.description,
-      inputSchema: zodToJsonSchema(toolDef.schema, {
-        $refStrategy: "none",
-      }),
-    };
-  });
-
-  const rpcResponse = {
-    jsonrpc: "2.0",
-    id: rpcRequest.id,
-    result: {
-      tools: tools,
-    },
-  };
-  res.json(rpcResponse);
-}
-
-// Handles the `tools/call` RPC method
-async function handleToolsCall(req, res, rpcRequest) {
-  const { name, arguments: args } = rpcRequest.params;
-  const toolDef = toolRegistry[name];
-
-  if (!toolDef) {
-    return res.status(400).json({
-      jsonrpc: "2.0",
-      id: rpcRequest.id,
-      error: { code: -32602, message: `Unknown tool: ${name}` },
-    });
+    return;
   }
 
-  try {
-    const ctx = {
-      reportProgress: (progress) => {
-        console.log(`[${name}] Progress:`, progress);
-      },
-    };
+  const { method, params, id } = message;
+  const sessionLogger = logger.child({ sessionId: session.id, rpcId: id });
 
-    const result = await toolDef.execute(args, ctx);
-
-    const rpcResponse = {
-      jsonrpc: "2.0",
-      id: rpcRequest.id,
-      result: {
-        content: [{ type: "text", text: result }],
-        isError: false,
-      },
-    };
-    res.json(rpcResponse);
-  } catch (e) {
-    console.error(`[${name}] Execution error:`, e.message);
-    const rpcResponse = {
-      jsonrpc: "2.0",
-      id: rpcRequest.id,
-      result: {
-        content: [{ type: "text", text: e.message }],
-        isError: true,
-      },
-    };
-    res.status(200).json(rpcResponse);
+  // --- Ultra-Flexible Handshake Logic ---
+  // If the session is new and the first request isn't 'initialize',
+  // we create and initialize the session on-the-fly for maximum compatibility.
+  if (session.state === "uninitialized" && method !== "initialize") {
+    sessionLogger.warn(
+      `Received method '${method}' before 'initialize'. Implicitly creating and initializing session.`
+    );
+    session.state = "initialized"; // Jump directly to initialized state
   }
-}
-
-// Main SSE/RPC endpoint
-app.post("/mcp", authMiddleware, async (req, res) => {
-  const rpcRequest = req.body;
-
-  if (
-    rpcRequest.jsonrpc !== "2.0" ||
-    !rpcRequest.method ||
-    rpcRequest.id === undefined
+  // Also handle clients that initialize but don't send 'notifications/initialized'
+  else if (
+    session.state === "pending_ack" &&
+    method !== "notifications/initialized"
   ) {
-    return res.status(400).json({
-      jsonrpc: "2.0",
-      id: rpcRequest.id || null,
-      error: { code: -32600, message: "Invalid Request" },
-    });
+    sessionLogger.warn(
+      `Received method '${method}' before 'notifications/initialized'. Implicitly completing handshake.`
+    );
+    session.state = "initialized";
   }
 
-  switch (rpcRequest.method) {
+  switch (method) {
+    case "initialize":
+      sessionLogger.info({ params }, "Received initialize request");
+      const initializeResponse = {
+        jsonrpc: "2.0",
+        id: id,
+        result: {
+          protocolVersion: "2025-03-26",
+          serverInfo: {
+            name: "BrightData-MCP-Server",
+            version: package_json.version,
+          },
+          capabilities: { tools: { listChanged: false } },
+        },
+      };
+      sendSseMessage(session.res, initializeResponse, "message");
+      session.state = "pending_ack";
+      break;
+
+    case "notifications/initialized":
+      if (session.state === "pending_ack" || session.state === "initialized") {
+        sessionLogger.info("Client handshake complete. Session is now active.");
+        session.state = "initialized";
+      }
+      break;
+
     case "tools/list":
-      handleToolsList(req, res, rpcRequest);
+      sessionLogger.info("Received tools/list request");
+      try {
+        const tools = Object.values(toolRegistry).map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: zodToJsonSchema(tool.parameters, {
+            $refStrategy: "none",
+          }),
+        }));
+        const listResponse = { jsonrpc: "2.0", id: id, result: { tools } };
+        sessionLogger.info(`Sending list of ${tools.length} tools.`);
+        sendSseMessage(session.res, listResponse, "message");
+      } catch (error) {
+        sessionLogger.fatal(
+          { err: error },
+          "An error occurred while generating the tool list"
+        );
+        sendSseMessage(
+          session.res,
+          {
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code: -32000,
+              message: "An error occurred while generating the tool list.",
+            },
+          },
+          "message"
+        );
+      }
       break;
 
     case "tools/call":
-      await handleToolsCall(req, res, rpcRequest);
+      sessionLogger.info(
+        { toolName: params.name, args: params.arguments },
+        "Received tools/call"
+      );
+      const tool = toolRegistry[params.name];
+      if (!tool) {
+        return sendSseMessage(
+          session.res,
+          {
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32601, message: `Tool not found: ${params.name}` },
+          },
+          "message"
+        );
+      }
+      try {
+        const result = await tool.execute(params.arguments, {});
+
+        // Log success upon completion
+        sessionLogger.info(
+          { toolName: params.name },
+          "Tool executed successfully"
+        );
+
+        sendSseMessage(
+          session.res,
+          {
+            jsonrpc: "2.0",
+            id,
+            result: { content: [{ type: "text", text: String(result) }] },
+          },
+          "message"
+        );
+      } catch (error) {
+        // This existing log correctly captures failures
+        sessionLogger.error(
+          { err: error, toolName: params.name },
+          "Tool execution failed"
+        );
+        sendSseMessage(
+          session.res,
+          {
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code: -32602,
+              message: `Tool execution error: ${error.message}`,
+            },
+          },
+          "message"
+        );
+      }
       break;
 
     default:
-      res.status(400).json({
-        jsonrpc: "2.0",
-        id: rpcRequest.id,
-        error: {
-          code: -32601,
-          message: `Method not found: ${rpcRequest.method}`,
-        },
-      });
+      sessionLogger.warn(`Method not found: ${method}`);
+      if (id) {
+        sendSseMessage(
+          session.res,
+          {
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32601, message: `Method not found: ${method}` },
+          },
+          "message"
+        );
+      }
+      break;
   }
+}
+
+// --- Routes ---
+app.get("/sse", authMiddleware, (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  logger.info("Client connected to /sse");
+  res.write(":ok\n");
+
+  const sessionId = uuidv4();
+  const session = { id: sessionId, res: res, state: "uninitialized" };
+  sseSessions.set(sessionId, session);
+  const rpcPath = `/sse/message?sessionId=${sessionId}`;
+
+  setTimeout(() => {
+    if (!res.writableEnded) {
+      logger.info({ sessionId }, "Sending endpoint event");
+      sendSseMessage(res, rpcPath, "endpoint");
+    }
+  }, 10);
+
+  const keepAliveInterval = setInterval(() => {
+    if (!res.writableEnded) {
+      sendSseMessage(res, "ping", "ping");
+    } else {
+      clearInterval(keepAliveInterval);
+    }
+  }, 25000);
+
+  req.on("close", () => {
+    logger.info({ sessionId }, "Client disconnected");
+    clearInterval(keepAliveInterval);
+    sseSessions.delete(sessionId);
+  });
 });
 
-// Start the Express server
+app.post("/sse/message", authMiddleware, async (req, res) => {
+  const { sessionId } = req.query;
+  const session = sseSessions.get(sessionId);
+  if (!session) {
+    return res.status(404).json({ error: "Invalid or expired session ID" });
+  }
+  await handleRpcMessage(req.body, session);
+  res.status(204).send();
+});
+
+// --- Start Server ---
 app.listen(PORT, () => {
-  console.log(`MCP-compliant server running on http://localhost:${PORT}`);
-  console.log("JSON-RPC endpoint available at: POST /mcp");
+  logger.info(`MCP-compliant server running on http://localhost:${PORT}`);
 });

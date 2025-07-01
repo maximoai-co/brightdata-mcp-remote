@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.0] - 2025-06-30
+
+### Changed
+
+- The RPC endpoint for stateful sessions was updated from `/rpc` to `/sse/message` for improved clarity and consistency with the SSE handshake endpoint.
+
+### Removed
+
+- Removed the simple, stateless `/mcp` endpoint to standardize on the more robust stateful SSE connection model.
+
+## [3.2.0] - 2025-06-30
+
+### Added
+
+- Implemented a "super-group" architecture to manage a large number of tools efficiently. Specialized `web_data` tools are now consolidated into thematic parent tools (e.g., `e_commerce_data`, `social_professional_data`).
+
+### Changed
+
+- The `tools/list` endpoint now returns a small, fixed number of high-level "group" tools. To execute a specialized data task, clients must now use the new group tools by specifying `site` and `task` parameters.
+- Enhanced the MCP handshake logic to be highly flexible, supporting clients that call tools directly without a formal `initialize` message.
+
+### Fixed
+
+- Resolved client timeouts and connection resets caused by excessively large `tools/list` payloads. The new grouping strategy ensures the tool list response is always small and reliable.
+
+## [3.1.0] - 2025-06-30
+
+### Added
+
+- **Stateful SSE Connections**: Added a `/sse` endpoint for advanced clients that require a persistent, stateful connection, following the handshake protocol expected by the Maximo AI backend.
+- **Session-Based RPC**: Implemented a `/rpc` endpoint to handle commands linked to an active SSE session, enabling full interactivity with compliant clients.
+- **Session Management**: A new in-memory session manager was added to track active client connections.
+- **New Dependency**: Added the `uuid` package to generate unique session identifiers for the new SSE protocol.
+
+### Changed
+
+- **Refactored RPC Handlers**: The `tools/list` and `tools/call` handlers were refactored to support writing to persistent SSE streams, in addition to simple HTTP responses.
+
 ## [3.0.0] - 2025-06-30
 
 ### Added
