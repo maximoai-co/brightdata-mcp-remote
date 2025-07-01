@@ -40,6 +40,7 @@ This allows for easier deployment, management, and connection from various distr
 - [🔧 Configuration](#-configuration)
 - [🔧 Available Tools](#-available-tools)
 - [⚠️ Security Best Practices](#%EF%B8%8F-security-best-practices)
+- [💰 Maximo AI Billing Model (when `HOSTING_MODE=maximo`)](#-maximo-ai-billing-model-when-hosting_mode=maximo)
 - [💡 Usage Examples](#-usage-examples)
 - [⚠️ Troubleshooting](#%EF%B8%8F-troubleshooting)
 
@@ -67,6 +68,13 @@ API_TOKEN="YOUR_BRIGHTDATA_API_TOKEN"
 
 # A new, secure, and secret token you create to protect your public MCP server
 MCP_SERVER_TOKEN="CREATE_YOUR_OWN_SECRET_TOKEN_HERE"
+
+# The URL of your Maximo AI backend server that handles billing and usage tracking
+# Required if HOSTING_MODE is 'maximo'
+MAXIMO_API_URL="[https://rad.huddlz.xyz/v1/mcp/charge](https://rad.huddlz.xyz/v1/mcp/charge)"
+
+# Set to 'self' for standalone operation (default) or 'maximo' to enable Maximo AI for billing
+HOSTING_MODE="maximo"
 ```
 
 ### 3\. **Start the Server**
@@ -118,6 +126,8 @@ The server is configured using environment variables, ideally set in your `.env`
 - `WEB_UNLOCKER_ZONE`: (Optional) The name of your Web Unlocker zone. Defaults to `mcp_unlocker`.
 - `BROWSER_ZONE`: (Optional) The name of your Browser API zone for browser control tools. Defaults to `mcp_browser`.
 - `RATE_LIMIT`: (Optional) Controls API usage with the format `limit/time+unit`. Examples: `100/1h`, `50/30m`.
+- `MAXIMO_API_URL`: **(Required for 'maximo' HOSTING_MODE)** The URL of your Maximo AI backend server that handles billing and usage tracking (e.g., `https://rad.huddlz.xyz/v1/mcp/charge`).
+- `HOSTING_MODE`: (Optional) Set to `'self'` for standalone operation (default) or `'maximo'` to enable Maximo AI for billing and usage tracking.
 
 ## 🔧 Available Tools
 
@@ -164,6 +174,35 @@ To get reviews for an Amazon product, an AI would follow this logic:
 - **Protect Your `MCP_SERVER_TOKEN`**: Your `MCP_SERVER_TOKEN` is the key to your server. Keep it secret and do not expose it in client-side code. It should only be used by trusted back-end clients.
 - **Treat Scraped Content as Untrusted**: Always treat scraped web content as untrusted data. Sanitize it before use.
 
+## 💰 Maximo AI Billing Model (when `HOSTING_MODE=maximo`)
+
+When running the server in `maximo` hosting mode, all interactions with the MCP server (including handshake, tool listing, and tool calls) are routed through your configured Maximo AI backend for billing and usage tracking.
+
+The billing model is as follows:
+
+- **Free Tier**: The first **50 requests** per user are completely free of charge.
+- **Paid Requests**: After the free tier is exhausted, each subsequent request will incur a fixed charge of **10 credits**.
+  - **Cost per Credit**: 100 credits cost $0.20, therefore 1 credit costs $0.002.
+
+This model provides a generous free usage tier while ensuring fair compensation for continued service. All API calls, regardless of their nature (e.g., `initialize`, `tools/list`, `tools/call`), contribute to the request count for the free tier.
+
+**Note**: In `maximo` mode, the individual `cost` defined for tools within `server.js` is informational only and is _not_ used for actual credit deduction. The Maximo AI backend (`MAXIMO_API_URL`) is the single source of truth for billing.
+
+### Maximo AI API Key & Usage
+
+To use the Maximo AI billing model, you will need a Maximo AI API Key.
+
+- **Get your API Key**: Log in or sign up at [https://maximoai.co](https://maximoai.co), open the user menu, and click on "Get Your API Key", or visit the direct link: [https://maximoai.co/platform](https://maximoai.co/platform).
+- **Track API Usage**: Monitor your API usage and credit consumption at [https://maximoai.co/apiusage](https://maximoai.co/apiusage).
+
+### Buying Maximo AI Credits
+
+Credits are required for paid requests.
+
+- **Buy Credits**: Visit [https://maximoai.co/buycredits](https://maximoai.co/buycredits) to purchase credits.
+- **Payment Method**: Currently, only crypto payment methods are supported. You will need to create and fund your Maximo AI crypto wallet first.
+- **Create Maximo AI Crypto Wallet**: Create your wallet here: [https://maximoai.co/menu](https://maximoai.co/menu). After funding, head to the buy credits page.
+
 ## ⚠️ Troubleshooting
 
 ### Connection Errors
@@ -178,3 +217,7 @@ If your client cannot connect, check the following:
 ### Timeouts
 
 Some tools can involve reading large amounts of web data. To ensure that your agent can consume the data, set a high enough timeout in your agent's settings (e.g., `180s`).
+
+```
+
+```

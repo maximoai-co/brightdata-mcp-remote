@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.4.0] - 2025-07-01
+
+### Added
+
+- **Flexible Hosting Modes**: Introduced `HOSTING_MODE` and `MAXIMO_API_URL` environment variables, allowing the server to operate in two distinct modes:
+  - **`self` (default)**: Standard standalone operation without external billing integration.
+  - **`maximo`**: Integrates with a Maximo AI backend for centralized billing and usage tracking.
+- **Comprehensive Usage Logging**: All MCP JSON-RPC methods (`initialize`, `notifications/initialized`, `tools/list`, `tools/call`) are now logged and counted towards user request limits when `HOSTING_MODE` is set to `maximo`.
+- **Centralized Billing Logic**: Implemented a new billing model where the Maximo AI backend (via `MAXIMO_API_URL`) is the sole authority for determining request costs.
+  - A free tier of **50 requests** is provided per user.
+  - After the free tier, each request costs a fixed **10 credits**.
+
+### Changed
+
+- **Billing Model Refactor**: The `server.js` no longer uses individual `tool.cost` for actual credit deductions; this is now handled by the Maximo AI backend. `tool.cost` in `server.js` is now informational.
+- **`verifyAndChargeMaximo`**: Function updated to remove the `cost` parameter, relying on the Maximo AI backend to determine the charge.
+
 ## [3.3.0] - 2025-06-30
 
 ### Changed

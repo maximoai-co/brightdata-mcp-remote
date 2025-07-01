@@ -29,10 +29,21 @@ app.use(cors());
 app.use(express.json());
 
 // --- Environment & Config ---
+const hosting_mode = process.env.HOSTING_MODE || "self"; // Default to 'self'
 const mcp_server_token = process.env.MCP_SERVER_TOKEN;
-if (!mcp_server_token) {
-  throw new Error("MCP_SERVER_TOKEN is not defined in your .env file.");
+const maximo_api_url = process.env.MAXIMO_API_URL;
+
+if (hosting_mode === "self" && !mcp_server_token) {
+  throw new Error(
+    "HOSTING_MODE is 'self' but MCP_SERVER_TOKEN is not defined."
+  );
 }
+if (hosting_mode === "maximo" && !maximo_api_url) {
+  throw new Error(
+    "HOSTING_MODE is 'maximo' but MAXIMO_API_URL is not defined."
+  );
+}
+logger.info(`Server running in ${hosting_mode.toUpperCase()} mode.`);
 
 const require = createRequire(import.meta.url);
 const package_json = require("./package.json");
@@ -59,8 +70,57 @@ function sendSseMessage(res, data, eventName) {
   res.write(encoder.encode(payload));
 }
 
-// --- Authentication ---
-const authMiddleware = (req, res, next) => {
+// --- Function to communicate with Maximo AI API for Charging/Verification ---
+async function verifyAndChargeMaximo(apiKey, toolName, requestId) {
+  // Removed 'cost' parameter
+  // In the Maximo AI billing model, 'cost' is determined by the backend.
+  // We send a placeholder credit_cost of 1, as the Maximo AI backend will
+  // decide the actual charge (0 for free tier, 10 for paid).
+  const placeholder_cost = 1;
+
+  try {
+    const response = await axios.post(
+      maximo_api_url,
+      {
+        credit_cost: placeholder_cost, // Send placeholder cost
+        tool_name: toolName,
+        request_id: requestId,
+      },
+      {
+        headers: { "x-api-key": apiKey },
+      }
+    );
+    return { success: true, data: response.data };
+  } catch (error) {
+    if (error.response) {
+      logger.error(
+        {
+          status: error.response.status,
+          data: error.response.data,
+          toolName: toolName,
+        },
+        "Maximo API charge failed"
+      );
+      return {
+        success: false,
+        error: error.response.data,
+        status: error.response.status,
+      };
+    }
+    logger.error(
+      { err: error, toolName: toolName },
+      "Failed to connect to Maximo API"
+    );
+    return {
+      success: false,
+      error: { message: "Could not connect to the charging service." },
+      status: 500,
+    };
+  }
+}
+
+// --- Authentication Middlewares ---
+const selfAuthMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).send("Unauthorized: Missing Bearer token");
@@ -72,9 +132,38 @@ const authMiddleware = (req, res, next) => {
   next();
 };
 
+const maximoAuthMiddleware = async (req, res, next) => {
+  const maximoApiKey = req.headers.authorization?.substring(7);
+  if (!maximoApiKey) {
+    return res
+      .status(401)
+      .json({ error: "Unauthorized: Missing Maximo AI Bearer token." });
+  }
+  // Initial verification uses "auth-check" tool name. This counts towards free requests.
+  const verification = await verifyAndChargeMaximo(
+    maximoApiKey,
+    "mcp-auth-check", // Consistent tool name for auth verification
+    uuidv4()
+  );
+
+  if (!verification.success) {
+    const statusCode = verification.status || 401;
+    return res
+      .status(statusCode)
+      .json({ error: "Forbidden", details: verification.error });
+  }
+
+  // Attach the validated key to the request object for later use in tool calls
+  req.maximoApiKey = maximoApiKey;
+  next();
+};
+
 // --- Tool Registration & Helpers ---
 function addTool(toolDef) {
-  toolRegistry[toolDef.name] = toolDef;
+  // toolDef.cost is now informational only on the server.js side for its own logging,
+  // but actual charging is determined by Maximo AI backend.
+  const cost = toolDef.cost || 10;
+  toolRegistry[toolDef.name] = { ...toolDef, cost };
 }
 
 function tool_fn(name, fn) {
@@ -93,6 +182,7 @@ const api_headers = () => ({
 addTool({
   name: "search_engine",
   description: "Scrape search results from Google, Bing or Yandex.",
+  cost: 25, // Example of a custom cost (informational here)
   parameters: z.object({
     query: z.string(),
     engine: z.enum(["google", "bing", "yandex"]).optional().default("google"),
@@ -120,6 +210,7 @@ addTool({
   name: "scrape",
   description:
     "Scrape a single webpage URL, returning content in markdown or HTML.",
+  cost: 15, // Example of a custom cost (informational here)
   parameters: z.object({
     url: z.string().url(),
     format: z.enum(["markdown", "html"]).default("markdown"),
@@ -144,6 +235,7 @@ const datasets = [
     site: "amazon",
     task_desc: "Get data for a single product.",
     inputs: ["url"],
+    cost: 50,
   },
   {
     id: "amazon_product_reviews",
@@ -151,6 +243,7 @@ const datasets = [
     site: "amazon",
     task_desc: "Get reviews for a product.",
     inputs: ["url"],
+    cost: 50,
   },
   {
     id: "walmart_product",
@@ -158,6 +251,7 @@ const datasets = [
     site: "walmart",
     task_desc: "Get data from a Walmart product page.",
     inputs: ["url"],
+    cost: 50,
   },
   {
     id: "ebay_product",
@@ -165,6 +259,7 @@ const datasets = [
     site: "ebay",
     task_desc: "Get data from an eBay product page.",
     inputs: ["url"],
+    cost: 50,
   },
   {
     id: "linkedin_person_profile",
@@ -172,6 +267,7 @@ const datasets = [
     site: "linkedin",
     task_desc: "Get data from a LinkedIn user profile.",
     inputs: ["url"],
+    cost: 75,
   },
   {
     id: "linkedin_company_profile",
@@ -179,6 +275,7 @@ const datasets = [
     site: "linkedin",
     task_desc: "Get data from a LinkedIn company profile.",
     inputs: ["url"],
+    cost: 75,
   },
   {
     id: "instagram_posts",
@@ -186,6 +283,7 @@ const datasets = [
     site: "instagram",
     task_desc: "Get data for an Instagram post.",
     inputs: ["url"],
+    cost: 40,
   },
   {
     id: "facebook_posts",
@@ -193,6 +291,7 @@ const datasets = [
     site: "facebook",
     task_desc: "Get data for a Facebook post.",
     inputs: ["url"],
+    cost: 40,
   },
   {
     id: "tiktok_posts",
@@ -200,6 +299,7 @@ const datasets = [
     site: "tiktok",
     task_desc: "Get data for a TikTok post.",
     inputs: ["url"],
+    cost: 40,
   },
   {
     id: "x_posts",
@@ -207,6 +307,7 @@ const datasets = [
     site: "x",
     task_desc: "Get data for an X (Twitter) post.",
     inputs: ["url"],
+    cost: 40,
   },
   {
     id: "youtube_videos",
@@ -214,6 +315,7 @@ const datasets = [
     site: "youtube",
     task_desc: "Get data for a YouTube video.",
     inputs: ["url"],
+    cost: 40,
   },
   {
     id: "Maps_reviews",
@@ -221,6 +323,7 @@ const datasets = [
     site: "Maps",
     task_desc: "Get reviews for a business from Google Maps.",
     inputs: ["url"],
+    cost: 60,
   },
   {
     id: "crunchbase_company",
@@ -228,6 +331,7 @@ const datasets = [
     site: "crunchbase",
     task_desc: "Get structured data for a company from Crunchbase.",
     inputs: ["url"],
+    cost: 60,
   },
   {
     id: "yahoo_finance_business",
@@ -236,6 +340,7 @@ const datasets = [
     task_desc:
       "Get structured financial data for a business from Yahoo Finance.",
     inputs: ["url"],
+    cost: 60,
   },
 ];
 
@@ -295,9 +400,16 @@ for (const groupName in superGroups) {
     ...group.allParams,
   });
 
+  const groupCost = Math.max(
+    ...Object.values(group.sites)
+      .flat()
+      .map((t) => t.cost || 50)
+  );
+
   addTool({
     name: groupToolName,
     description: groupDescription,
+    cost: groupCost, // Informational here
     parameters: groupParameters,
     execute: tool_fn(groupToolName, async (data) => {
       const { site, task, ...args } = data;
@@ -338,16 +450,12 @@ async function handleRpcMessage(message, session) {
   const sessionLogger = logger.child({ sessionId: session.id, rpcId: id });
 
   // --- Ultra-Flexible Handshake Logic ---
-  // If the session is new and the first request isn't 'initialize',
-  // we create and initialize the session on-the-fly for maximum compatibility.
   if (session.state === "uninitialized" && method !== "initialize") {
     sessionLogger.warn(
       `Received method '${method}' before 'initialize'. Implicitly creating and initializing session.`
     );
-    session.state = "initialized"; // Jump directly to initialized state
-  }
-  // Also handle clients that initialize but don't send 'notifications/initialized'
-  else if (
+    session.state = "initialized";
+  } else if (
     session.state === "pending_ack" &&
     method !== "notifications/initialized"
   ) {
@@ -357,6 +465,61 @@ async function handleRpcMessage(message, session) {
     session.state = "initialized";
   }
 
+  let toolNameToLog = "unknown-mcp-method"; // Default for logging
+
+  // ALL RPC METHODS WILL NOW TRIGGER A CHARGE/VERIFICATION
+  if (hosting_mode === "maximo") {
+    let chargeResult;
+    switch (method) {
+      case "initialize":
+        toolNameToLog = "mcp-initialize"; //
+        break;
+      case "notifications/initialized":
+        toolNameToLog = "mcp-notifications-initialized"; //
+        break;
+      case "tools/list":
+        toolNameToLog = "mcp-tools-list"; //
+        break;
+      case "tools/call":
+        toolNameToLog = `mcp-tool-call:${params.name}`; // Log the specific tool called
+        break;
+      default:
+        toolNameToLog = `mcp-method-unknown:${method}`; // Catch any other methods
+        break;
+    }
+
+    chargeResult = await verifyAndChargeMaximo(
+      session.maximoApiKey,
+      toolNameToLog, // Pass the descriptive tool name for logging
+      id
+    );
+
+    if (!chargeResult.success) {
+      const statusCode = chargeResult.status || 402; // 402 Payment Required
+      const errorMessage =
+        chargeResult.error?.message ||
+        "Failed to process request due to billing.";
+      return sendSseMessage(
+        session.res,
+        {
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32001,
+            message: errorMessage,
+            data: chargeResult.error,
+          },
+        },
+        "message"
+      );
+    }
+    sessionLogger.info(
+      { toolName: toolNameToLog, costInfo: chargeResult.data }, // Log the cost info from backend
+      "Successfully processed request via Maximo API billing"
+    );
+  }
+
+  // Handle actual RPC methods
   switch (method) {
     case "initialize":
       sessionLogger.info({ params }, "Received initialize request");
@@ -433,6 +596,7 @@ async function handleRpcMessage(message, session) {
           "message"
         );
       }
+
       try {
         const result = await tool.execute(params.arguments, {});
 
@@ -490,44 +654,54 @@ async function handleRpcMessage(message, session) {
 }
 
 // --- Routes ---
-app.get("/sse", authMiddleware, (req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-    "X-Accel-Buffering": "no",
-  });
-  logger.info("Client connected to /sse");
-  res.write(":ok\n");
+app.get(
+  "/sse",
+  hosting_mode === "maximo" ? maximoAuthMiddleware : selfAuthMiddleware,
+  (req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    logger.info("Client connected to /sse");
+    res.write(":ok\n");
 
-  const sessionId = uuidv4();
-  const session = { id: sessionId, res: res, state: "uninitialized" };
-  sseSessions.set(sessionId, session);
-  const rpcPath = `/sse/message?sessionId=${sessionId}`;
+    const sessionId = uuidv4();
+    const session = { id: sessionId, res: res, state: "uninitialized" };
 
-  setTimeout(() => {
-    if (!res.writableEnded) {
-      logger.info({ sessionId }, "Sending endpoint event");
-      sendSseMessage(res, rpcPath, "endpoint");
+    // If in Maximo mode, store the API key in the session to use for charging
+    if (hosting_mode === "maximo") {
+      session.maximoApiKey = req.maximoApiKey;
     }
-  }, 10);
 
-  const keepAliveInterval = setInterval(() => {
-    if (!res.writableEnded) {
-      sendSseMessage(res, "ping", "ping");
-    } else {
+    sseSessions.set(sessionId, session);
+    const rpcPath = `/sse/message?sessionId=${sessionId}`;
+
+    setTimeout(() => {
+      if (!res.writableEnded) {
+        logger.info({ sessionId }, "Sending endpoint event");
+        sendSseMessage(res, rpcPath, "endpoint");
+      }
+    }, 10);
+
+    const keepAliveInterval = setInterval(() => {
+      if (!res.writableEnded) {
+        sendSseMessage(res, "ping", "ping");
+      } else {
+        clearInterval(keepAliveInterval);
+      }
+    }, 25000);
+
+    req.on("close", () => {
+      logger.info({ sessionId }, "Client disconnected");
       clearInterval(keepAliveInterval);
-    }
-  }, 25000);
+      sseSessions.delete(sessionId);
+    });
+  }
+);
 
-  req.on("close", () => {
-    logger.info({ sessionId }, "Client disconnected");
-    clearInterval(keepAliveInterval);
-    sseSessions.delete(sessionId);
-  });
-});
-
-app.post("/sse/message", authMiddleware, async (req, res) => {
+app.post("/sse/message", async (req, res) => {
   const { sessionId } = req.query;
   const session = sseSessions.get(sessionId);
   if (!session) {
